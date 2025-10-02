@@ -73,10 +73,29 @@ def main():
             resume=resume
         )
     else:
-        # Default: Run curriculum training with resume
-        base_timesteps = int(sys.argv[1]) if len(sys.argv) > 1 else 50_000
+        # Parse arguments for curriculum training
+        args = sys.argv[1:]
+        base_timesteps = 50_000
+        param_type = "auto"  # Default: auto-select best available parameters
+        
+        # Parse arguments
+        i = 0
+        while i < len(args):
+            if args[i] == "--params" and i + 1 < len(args):
+                param_type = args[i + 1]
+                i += 2
+            elif args[i].isdigit():
+                base_timesteps = int(args[i])
+                i += 1
+            else:
+                i += 1
+        
+        # Set parameter type in trainer
+        trainer.optimizer.param_type = param_type
+        
         print("Starting curriculum training across multiple VizDoom environments")
         print(f"Base timesteps per environment: {base_timesteps:,}")
+        print(f"Parameter type: {param_type}")
         print("Resume mode: Enabled (use --fresh to start over)")
         
         trainer.train_curriculum(base_timesteps=base_timesteps, resume=True)

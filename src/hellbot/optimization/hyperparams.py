@@ -112,37 +112,81 @@ class HyperparameterOptimizer:
         
         print(f"Hyperparameters saved to: {self.hyperparams_file}")
     
-    def load_best_hyperparams(self) -> Dict[str, Any]:
-        """Load best hyperparameters from previous optimization"""
-        if os.path.exists(self.hyperparams_file):
-            try:
-                with open(self.hyperparams_file, 'r') as f:
-                    params = json.load(f)
-                print(f"Loaded optimized hyperparameters from: {self.hyperparams_file}")
-                return params
-            except Exception as e:
-                print(f"Failed to load hyperparameters: {e}")
+    def load_best_hyperparams(self, force_type: str = "auto") -> Dict[str, Any]:
+        """Load best hyperparameters from previous optimization
         
-        print("No optimized hyperparameters found. Using pre-optimized defaults.")
-        return self.get_optimized_params()
+        Args:
+            force_type: "auto" (default), "optimized", "default", or "saved"
+        """
+        
+        if force_type == "default":
+            print("🔧 Using DEFAULT hyperparameters (conservative)")
+            return self.get_default_params()
+        elif force_type == "optimized":
+            print("🚀 Using pre-OPTIMIZED hyperparameters (recommended)")
+            return self.get_optimized_params()
+        elif force_type == "saved":
+            if os.path.exists(self.hyperparams_file):
+                try:
+                    with open(self.hyperparams_file, 'r') as f:
+                        params = json.load(f)
+                    print(f"📁 Using SAVED hyperparameters from: {self.hyperparams_file}")
+                    return params
+                except Exception as e:
+                    print(f"Failed to load saved hyperparameters: {e}")
+                    print("Falling back to optimized parameters...")
+                    return self.get_optimized_params()
+            else:
+                print("No saved hyperparameters found. Using optimized defaults.")
+                return self.get_optimized_params()
+        else:  # auto mode
+            if os.path.exists(self.hyperparams_file):
+                try:
+                    with open(self.hyperparams_file, 'r') as f:
+                        params = json.load(f)
+                    print(f"📁 Loaded Optuna-optimized hyperparameters from: {self.hyperparams_file}")
+                    return params
+                except Exception as e:
+                    print(f"Failed to load hyperparameters: {e}")
+            
+            print("🚀 No Optuna results found. Using pre-optimized defaults.")
+            return self.get_optimized_params()
     
-    def create_objective_function(self, env_creator, trainer_class):
-        """Create objective function for Optuna optimization"""
+    def create_objective_function(self, env_creator, trainer_class, 
+                                 eval_timesteps: int = 50000):
+        """Create objective function for Optuna optimization
+        
+        Args:
+            env_creator: Function to create environment
+            trainer_class: Trainer class to use
+            eval_timesteps: Number of timesteps for evaluation (default: 50k)
+        """
         
         def objective(trial):
             try:
+                print(f"\n🔬 Trial {trial.number}: Testing hyperparameters...")
+                
                 # Get suggested hyperparameters
                 hyperparams = self.suggest_hyperparams_with_optuna(trial)
+                
+                # Print key parameters being tested
+                print(f"  Learning rate: {hyperparams.get('learning_rate', 'N/A')}")
+                print(f"  Batch size: {hyperparams.get('batch_size', 'N/A')}")
+                print(f"  Entropy coef: {hyperparams.get('ent_coef', 'N/A')}")
                 
                 # Create environment and trainer
                 env = env_creator()
                 trainer = trainer_class(env, hyperparams)
                 
-                # Short training for evaluation
-                trainer.train(total_timesteps=10000)
+                # Meaningful training duration (50k steps = ~10-15 minutes)
+                print(f"  Training for {eval_timesteps:,} steps...")
+                trainer.train(total_timesteps=eval_timesteps)
                 
-                # Evaluate performance
-                avg_reward = trainer.evaluate(n_episodes=5)
+                # Evaluate performance over multiple episodes
+                print(f"  Evaluating performance...")
+                avg_reward = trainer.evaluate(n_episodes=10)  # More episodes for stable evaluation
+                
+                print(f"  ✓ Trial {trial.number} result: {avg_reward:.2f}")
                 
                 # Clean up
                 trainer.cleanup()
@@ -150,7 +194,7 @@ class HyperparameterOptimizer:
                 return avg_reward
                 
             except Exception as e:
-                print(f"Trial failed: {e}")
+                print(f"  ✗ Trial {trial.number} failed: {e}")
                 return -1000  # Large penalty for failed trials
         
         return objective

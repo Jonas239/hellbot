@@ -3,15 +3,183 @@ VizDoom environment management and wrapping utilities.
 """
 
 import gymnasium as gym
-from gymnasium.spaces import Discrete, MultiDiscrete
-from vizdoom import ScreenResolution, ScreenFormat
+from gymnasium.spaces import Discrete, MultiDiscrete, Box
+from vizdoom import ScreenResolution, ScreenFormat, DoomGame, Mode, Button
+import vizdoom
 from typing import Union
 import os
 import sys
+import numpy as np
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 from config.settings import ENVIRONMENT_CONFIG
+
+
+class BasicVizdoomEnv(gym.Env):
+    """Basic VizDoom Environment that can be configured for different scenarios"""
+    
+    def __init__(self, scenario_file='basic.cfg', render_mode=None):
+        super().__init__()
+        self.game = DoomGame()
+        self.render_mode = render_mode
+        
+        # Set scenario file
+        scenario_path = self._get_scenario_path(scenario_file)
+        if os.path.exists(scenario_path):
+            self.game.load_config(scenario_path)
+        else:
+            # Fallback basic configuration if scenario file not found
+            self._setup_basic_config()
+        
+        # Configure rendering
+        self.game.set_window_visible(render_mode is not None)
+        self.game.set_mode(Mode.PLAYER)
+        
+        # Initialize game
+        self.game.init()
+        
+        # Set up action and observation spaces
+        n_buttons = self.game.get_available_buttons_size()
+        if n_buttons == 0:
+            n_buttons = 3  # Fallback: move left, move right, attack
+        self.action_space = Discrete(n_buttons)
+        
+        # Observation space (screen buffer)
+        h, w = self.game.get_screen_height(), self.game.get_screen_width()
+        self.observation_space = Box(
+            low=0, high=255, shape=(h, w, 3), dtype=np.uint8
+        )
+        
+    def _get_scenario_path(self, scenario_file):
+        """Get path to VizDoom scenario file"""
+        # Try to find scenario in VizDoom installation
+        vizdoom_path = os.path.dirname(vizdoom.__file__)
+        scenarios_path = os.path.join(vizdoom_path, 'scenarios')
+        return os.path.join(scenarios_path, scenario_file)
+        
+    def _setup_basic_config(self):
+        """Setup basic configuration if no scenario file found"""
+        self.game.set_screen_resolution(ScreenResolution.RES_640X480)
+        self.game.set_screen_format(ScreenFormat.RGB24)
+        self.game.set_render_hud(False)
+        self.game.set_render_crosshair(False)
+        self.game.set_render_weapon(True)
+        self.game.set_render_decals(False)
+        self.game.set_render_particles(False)
+        
+        # Add basic buttons
+        self.game.add_available_button(Button.MOVE_LEFT)
+        self.game.add_available_button(Button.MOVE_RIGHT)
+        self.game.add_available_button(Button.ATTACK)
+        
+        # Set game variables
+        self.game.set_doom_skill(2)
+        
+    def reset(self, seed=None, options=None):
+        if seed is not None:
+            self.game.set_seed(seed)
+        self.game.new_episode()
+        state = self.game.get_state()
+        if state is not None:
+            observation = state.screen_buffer.transpose(1, 2, 0)  # CHW to HWC
+        else:
+            observation = np.zeros(self.observation_space.shape, dtype=np.uint8)
+        return observation, {}
+        
+    def step(self, action):
+        # Convert action to VizDoom format
+        n_buttons = self.game.get_available_buttons_size()
+        if n_buttons == 0:
+            n_buttons = 3
+        actions = [0] * n_buttons
+        if action < len(actions):
+            actions[action] = 1
+            
+        reward = self.game.make_action(actions)
+        done = self.game.is_episode_finished()
+        
+        if done:
+            observation = np.zeros(self.observation_space.shape, dtype=np.uint8)
+        else:
+            state = self.game.get_state()
+            observation = state.screen_buffer.transpose(1, 2, 0) if state else np.zeros(self.observation_space.shape, dtype=np.uint8)
+            
+        return observation, reward, done, False, {}
+        
+    def close(self):
+        if hasattr(self, 'game'):
+            self.game.close()
+
+
+# Register basic VizDoom environments
+try:
+    # Register a few basic environments that we can create
+    registry = gym.envs.registry
+    if hasattr(registry, 'env_specs'):
+        env_specs = registry.env_specs
+    else:
+        env_specs = registry
+    
+    if 'VizdoomBasic-v0' not in env_specs:
+        gym.register(
+            id='VizdoomBasic-v0',
+            entry_point=lambda: BasicVizdoomEnv('basic.cfg')
+        )
+    
+    if 'VizdoomCorridor-v0' not in env_specs:
+        gym.register(
+            id='VizdoomCorridor-v0',
+            entry_point=lambda: BasicVizdoomEnv('deadly_corridor.cfg')
+        )
+    
+    if 'VizdoomDefendCenter-v0' not in env_specs:
+        gym.register(
+            id='VizdoomDefendCenter-v0',
+            entry_point=lambda: BasicVizdoomEnv('defend_the_center.cfg')
+        )
+        
+    if 'VizdoomDefendLine-v0' not in env_specs:
+        gym.register(
+            id='VizdoomDefendLine-v0',
+            entry_point=lambda: BasicVizdoomEnv('defend_the_line.cfg')
+        )
+        
+    if 'VizdoomHealthGathering-v0' not in env_specs:
+        gym.register(
+            id='VizdoomHealthGathering-v0',
+            entry_point=lambda: BasicVizdoomEnv('health_gathering.cfg')
+        )
+        
+    if 'VizdoomMyWayHome-v0' not in env_specs:
+        gym.register(
+            id='VizdoomMyWayHome-v0',
+            entry_point=lambda: BasicVizdoomEnv('my_way_home.cfg')
+        )
+        
+    if 'VizdoomPredictPosition-v0' not in env_specs:
+        gym.register(
+            id='VizdoomPredictPosition-v0',
+            entry_point=lambda: BasicVizdoomEnv('predict_position.cfg')
+        )
+        
+    if 'VizdoomTakeCover-v0' not in env_specs:
+        gym.register(
+            id='VizdoomTakeCover-v0',
+            entry_point=lambda: BasicVizdoomEnv('take_cover.cfg')
+        )
+        
+    if 'VizdoomDeathmatch-v0' not in env_specs:
+        gym.register(
+            id='VizdoomDeathmatch-v0',
+            entry_point=lambda: BasicVizdoomEnv('deathmatch.cfg')
+        )
+    
+    print("✓ VizDoom environments registered successfully")
+    
+except Exception as e:
+    print(f"Warning: Could not register VizDoom environments: {e}")
+    print("VizDoom package may not be properly installed")
 
 
 class ActionSpaceWrapper(gym.ActionWrapper):

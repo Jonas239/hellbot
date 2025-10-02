@@ -20,6 +20,8 @@ run = [
     "mkdir -p models/ppo",
     "echo 'Checking PyTorch and CUDA setup...'",
     "uv run python -c 'import torch; print(f\"PyTorch version: {torch.__version__}\"); print(f\"CUDA available: {torch.cuda.is_available()}\"); print(f\"Device count: {torch.cuda.device_count() if torch.cuda.is_available() else 0}\")'",
+    "echo 'Testing VizDoom environments...'",
+    "uv run python -c 'from src.hellbot.environments.vizdoom_env import *; print(\"VizDoom environment setup complete\")'",
     "echo 'Environment setup complete!'"
 ]
 
@@ -88,38 +90,86 @@ run = [
 ]
 depends = ["setup"]
 
-[tasks.optimize]
-description = "Optimize hyperparameters using Optuna (20 trials, 1 hour)"
+# Parameter-specific training tasks
+[tasks.train-default-params]
+description = "Training with DEFAULT (conservative) parameters"
 run = [
-    "echo 'Starting hyperparameter optimization...'",
-    "echo 'This will run 20 trials over 1 hour to find optimal PPO parameters'",
-    "uv run python scripts/train.py --optimize VizdoomDefendCenter-v0 20 3600"
+    "echo '🔧 Training with DEFAULT parameters (conservative, safe)'",
+    "echo 'These are basic parameters that work but may not be optimal'",
+    "uv run python scripts/train.py 100000 --params default"
+]
+depends = ["setup"]
+
+[tasks.train-optimized-params]
+description = "Training with pre-OPTIMIZED parameters (recommended)"
+run = [
+    "echo '🚀 Training with pre-OPTIMIZED parameters (recommended)'",
+    "echo 'These are tuned parameters that work well for VizDoom'",
+    "uv run python scripts/train.py 100000 --params optimized"
+]
+depends = ["setup"]
+
+[tasks.train-saved-params]
+description = "Training with SAVED Optuna parameters (if available)"
+run = [
+    "echo '📁 Training with SAVED Optuna-optimized parameters'",
+    "echo 'Uses parameters from previous hyperparameter optimization'",
+    "uv run python scripts/train.py 100000 --params saved"
+]
+depends = ["setup"]
+
+[tasks.optimize]
+description = "Optimize hyperparameters using Optuna (20 trials, 10k steps per trial)"
+run = [
+    "echo '🔬 Starting hyperparameter optimization...'",
+    "echo 'Configuration: 20 trials, 10k training steps per trial'",
+    "echo 'Each trial takes ~2-3 minutes for evaluation'",
+    "echo 'Expected total time: ~1-2 hours'",
+    "uv run python scripts/train.py --optimize VizdoomDefendCenter-v0 20 7200"
 ]
 depends = ["setup"]
 
 [tasks.optimize-quick]
-description = "Quick hyperparameter optimization (10 trials, 30 minutes)"
+description = "Quick hyperparameter optimization (5 trials, 10k steps per trial)"
 run = [
-    "echo 'Starting quick hyperparameter optimization...'",
-    "uv run python scripts/train.py --optimize VizdoomDefendCenter-v0 10 1800"
+    "echo '🔬 Starting quick hyperparameter optimization...'",
+    "echo 'Configuration: 5 trials, 10k training steps per trial'",
+    "echo 'Good for quick parameter testing'",
+    "echo 'Expected time: ~15-20 minutes'",
+    "uv run python scripts/train.py --optimize VizdoomDefendCenter-v0 5 1800"
 ]
 depends = ["setup"]
 
 [tasks.optimize-intensive]
-description = "Intensive hyperparameter optimization (50 trials, 3 hours)"
+description = "Intensive hyperparameter optimization (50 trials, 10k steps per trial)"
 run = [
-    "echo 'Starting intensive hyperparameter optimization...'",
-    "uv run python scripts/train.py --optimize VizdoomDefendCenter-v0 50 10800"
+    "echo '🔬 Starting intensive hyperparameter optimization...'",
+    "echo 'Configuration: 50 trials, 10k training steps per trial'",
+    "echo 'This will find the best possible parameters'",
+    "echo 'Expected time: ~3-4 hours'",
+    "uv run python scripts/train.py --optimize VizdoomDefendCenter-v0 50 14400"
 ]
 depends = ["setup"]
 
 [tasks.play]
-description = "Play/test the trained hellbot model (default environment)"
+description = "Play/test the trained hellbot model (SAFE mode - same visuals as training)"
 run = [
-    "echo 'Loading trained model for gameplay...'",
-    "if [ ! -f models/ppo/hellbot.zip ]; then echo 'No trained model found! Run \"mise run train\" first.'; exit 1; fi",
-    "echo 'Starting gameplay with trained model in VizdoomDefendCenter-v0...'",
+    "echo '🎮 Loading trained model for safe gameplay...'",
+    "if [ ! -f models/ppo/hellbot.zip ]; then echo '❌ No trained model found! Run \"mise run train\" first.'; exit 1; fi",
+    "echo '✓ Using SAFE mode - same visual setup as training'",
+    "echo 'Environment: VizdoomDefendCenter-v0'",
     "uv run python scripts/play.py"
+]
+depends = ["setup"]
+
+[tasks.play-unsafe]
+description = "Play with HUD/crosshair visible (may confuse model but better for humans)"
+run = [
+    "echo '🎮 Loading trained model for unsafe gameplay...'",
+    "if [ ! -f models/ppo/hellbot.zip ]; then echo '❌ No trained model found! Run \"mise run train\" first.'; exit 1; fi",
+    "echo '⚠️  WARNING: Using unsafe mode with HUD/crosshair enabled'",
+    "echo 'This may confuse the model but is easier for humans to watch'",
+    "uv run python scripts/play.py VizdoomDefendCenter-v0 5 --unsafe"
 ]
 depends = ["setup"]
 

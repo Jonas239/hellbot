@@ -54,10 +54,12 @@ class HellbotTrainer:
         """Initialize PPO model with given or loaded hyperparameters"""
         
         if hyperparams is None:
-            hyperparams = self.optimizer.load_best_hyperparams()
+            # Check if param_type is set on optimizer
+            param_type = getattr(self.optimizer, 'param_type', 'auto')
+            hyperparams = self.optimizer.load_best_hyperparams(force_type=param_type)
         
         model = PPO(
-            "MultiInputPolicy",
+            "CnnPolicy",
             env,
             verbose=1,
             device=self.device,
@@ -194,11 +196,20 @@ class HellbotTrainer:
         self.vec_env = self.create_vectorized_env(env_name, difficulty)
         
         # Load or create model
+        # For curriculum training, we start fresh for each environment to avoid compatibility issues
+        # but can transfer knowledge through the saved weights if they're compatible
         if os.path.exists(model_path) and resume:
             print(f"Loading existing model from: {model_path}")
             try:
-                self.model = PPO.load(model_path, env=self.vec_env, device=self.device)
-                print("Successfully loaded existing model for continued training")
+                # Try to load the model, but if environments have different specs, start fresh
+                temp_model = PPO.load(model_path, device=self.device)
+                if (temp_model.observation_space == self.vec_env.observation_space and 
+                    temp_model.action_space == self.vec_env.action_space):
+                    self.model = PPO.load(model_path, env=self.vec_env, device=self.device)
+                    print("Successfully loaded existing model for continued training")
+                else:
+                    print("Environment specs changed. Creating new model for this environment.")
+                    self.model = self.initialize_model(self.vec_env)
             except Exception as e:
                 print(f"Failed to load model: {e}. Creating new model.")
                 self.model = self.initialize_model(self.vec_env)
@@ -292,10 +303,15 @@ class HellbotTrainer:
                 print(f"Total progress: {self.total_steps_completed:,} steps completed")
                 print("-" * 40)
                 
-                # Check if this phase was already completed
+                # Check if this phase was already completed (not just skipped)
                 if env_name in self.training_progress:
-                    print(f"Phase {i+1} already completed. Skipping...")
-                    continue
+                    progress_entry = self.training_progress[env_name]
+                    if isinstance(progress_entry, dict) and progress_entry.get('completed'):
+                        print(f"Phase {i+1} already completed. Skipping...")
+                        continue
+                    elif progress_entry == "skipped":
+                        # Environment was skipped before, try again
+                        print(f"Phase {i+1} was previously skipped. Trying again...")
                 
                 # Check if environment is available
                 if not self.env_manager.check_environment_availability(env_name):
@@ -356,9 +372,11 @@ class HellbotTrainer:
         def create_env():
             return self.create_vectorized_env(env_name, 2, 4)  # Smaller for optimization
         
+        # Use shorter evaluation for optimization (10k steps = ~2-3 minutes per trial)
         objective = self.optimizer.create_objective_function(
             create_env, 
-            lambda env, hyperparams: ModelTrainer(env, hyperparams, self.device)
+            lambda env, hyperparams: ModelTrainer(env, hyperparams, self.device),
+            eval_timesteps=10000  # Shorter for optimization
         )
         
         return self.optimizer.optimize_hyperparameters(objective, n_trials, timeout)
@@ -510,7 +528,7 @@ class ModelTrainer:
     def train(self, total_timesteps: int) -> None:
         """Train model for given timesteps"""
         self.model = PPO(
-            "MultiInputPolicy",
+            "CnnPolicy",
             self.env,
             verbose=0,  # Quiet for optimization
             device=self.device,
@@ -527,18 +545,28 @@ class ModelTrainer:
         
         for _ in range(n_episodes):
             obs = self.env.reset()
-            total_reward = 0
+            episode_reward = 0
             done = False
             
             while not done:
                 action, _ = self.model.predict(obs, deterministic=True)
-                obs, reward, done, _ = self.env.step(action)
-                total_reward += reward[0] if isinstance(reward, np.ndarray) else reward
+                obs, reward, done, info = self.env.step(action)
+                
+                # Handle vectorized environment rewards
+                if isinstance(reward, (list, np.ndarray)):
+                    episode_reward += reward[0]
+                    done = done[0] if isinstance(done, (list, np.ndarray)) else done
+                else:
+                    episode_reward += reward
+                
                 if done:
                     break
             
-            total_rewards.append(total_reward)
+            total_rewards.append(episode_reward)
         
+        if len(total_rewards) == 0:
+            return -1000
+            
         return np.mean(total_rewards)
     
     def cleanup(self) -> None:
