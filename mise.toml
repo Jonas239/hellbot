@@ -1,0 +1,229 @@
+[tools]
+python = "3.12"
+uv = "latest"
+
+[env]
+# CUDA settings for PyTorch
+CUDA_VISIBLE_DEVICES = "0"
+# VizDoom settings
+VIZDOOM_PACKAGE_PATH = "./_vizdoom"
+
+[tasks.setup]
+description = "Setup complete development environment"
+run = [
+    "echo 'Setting up hellbot development environment...'",
+    "echo 'Installing dependencies...'",
+    "uv sync",
+    "echo 'Installing PyTorch with CUDA support (if available)...'",
+    "uv add torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 || echo 'CUDA version not available, using CPU version'",
+    "echo 'Creating models directory...'", 
+    "mkdir -p models/ppo",
+    "echo 'Checking PyTorch and CUDA setup...'",
+    "uv run python -c 'import torch; print(f\"PyTorch version: {torch.__version__}\"); print(f\"CUDA available: {torch.cuda.is_available()}\"); print(f\"Device count: {torch.cuda.device_count() if torch.cuda.is_available() else 0}\")'",
+    "echo 'Environment setup complete!'"
+]
+
+[tasks.train]
+description = "Default training (100k base = ~1M total, 2-4 hours) - Resumable with checkpoints"
+run = [
+    "echo 'Starting curriculum training with checkpoint support...'",
+    "echo 'Base timesteps: 100k (Total: ~1M steps)'",
+    "echo 'Estimated time: 2-4 hours'",
+    "echo '✓ Automatic checkpoints every 50k steps'",
+    "echo '✓ Resume support - training continues from where it left off'",
+    "echo '✓ Progress tracking across environments'",
+    "echo 'Checking CUDA setup...'",
+    "uv run python -c 'import torch; print(f\"Using device: {torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")}\")'",
+    "echo 'Starting curriculum training...'",
+    "uv run python scripts/train.py 100000"
+]
+depends = ["setup"]
+
+[tasks.train-test]
+description = "Quick test training (30k base = ~300k total, 30-60 min)"
+run = [
+    "echo 'Starting quick test training (30k base timesteps)...'",
+    "echo 'Total: ~300k steps, Time: ~30-60 minutes'",
+    "uv run python scripts/train.py 30000"
+]
+depends = ["setup"]
+
+[tasks.train-balanced]
+description = "Balanced training (200k base = ~2M total, 4-8 hours)"
+run = [
+    "echo 'Starting balanced training (200k base timesteps)...'",
+    "echo 'Total: ~2M steps, Time: ~4-8 hours'",
+    "uv run python scripts/train.py 200000"
+]
+depends = ["setup"]
+
+[tasks.train-intensive]
+description = "Intensive training (500k base = ~5M total, 10-20 hours)"
+run = [
+    "echo 'Starting intensive training (500k base timesteps)...'",
+    "echo 'Total: ~5M steps, Time: ~10-20 hours'",
+    "echo 'This will produce a high-quality bot!'",
+    "uv run python scripts/train.py 500000"
+]
+depends = ["setup"]
+
+[tasks.train-professional]
+description = "Professional training (1M base = ~10M total, 20+ hours) - Full checkpoint support"
+run = [
+    "echo 'Starting professional training with full checkpoint support...'",
+    "echo 'Total: ~10M steps, Time: ~20+ hours'",
+    "echo 'This will produce competition-level performance!'",
+    "echo '✓ Checkpoints every 50k steps for maximum safety'",
+    "echo '✓ Full resume capability - can be interrupted and restarted anytime'",
+    "echo '✓ Progress backups created automatically'",
+    "uv run python scripts/train.py 1000000"
+]
+depends = ["setup"]
+
+[tasks.train-single]
+description = "Train on a single environment (legacy mode)"
+run = [
+    "echo 'Training on single environment: VizdoomDefendCenter-v0'",
+    "uv run python scripts/train.py --single VizdoomDefendCenter-v0 200000 2"
+]
+depends = ["setup"]
+
+[tasks.optimize]
+description = "Optimize hyperparameters using Optuna (20 trials, 1 hour)"
+run = [
+    "echo 'Starting hyperparameter optimization...'",
+    "echo 'This will run 20 trials over 1 hour to find optimal PPO parameters'",
+    "uv run python scripts/train.py --optimize VizdoomDefendCenter-v0 20 3600"
+]
+depends = ["setup"]
+
+[tasks.optimize-quick]
+description = "Quick hyperparameter optimization (10 trials, 30 minutes)"
+run = [
+    "echo 'Starting quick hyperparameter optimization...'",
+    "uv run python scripts/train.py --optimize VizdoomDefendCenter-v0 10 1800"
+]
+depends = ["setup"]
+
+[tasks.optimize-intensive]
+description = "Intensive hyperparameter optimization (50 trials, 3 hours)"
+run = [
+    "echo 'Starting intensive hyperparameter optimization...'",
+    "uv run python scripts/train.py --optimize VizdoomDefendCenter-v0 50 10800"
+]
+depends = ["setup"]
+
+[tasks.play]
+description = "Play/test the trained hellbot model (default environment)"
+run = [
+    "echo 'Loading trained model for gameplay...'",
+    "if [ ! -f models/ppo/hellbot.zip ]; then echo 'No trained model found! Run \"mise run train\" first.'; exit 1; fi",
+    "echo 'Starting gameplay with trained model in VizdoomDefendCenter-v0...'",
+    "uv run python scripts/play.py"
+]
+depends = ["setup"]
+
+[tasks.play-env]
+description = "Play in a specific environment (usage: mise run play-env -- VizdoomCorridor-v0)"
+run = [
+    "echo 'Playing in custom environment...'",
+    "if [ ! -f models/ppo/hellbot.zip ]; then echo 'No trained model found! Run \"mise run train\" first.'; exit 1; fi",
+    "uv run python scripts/play.py \"$@\""
+]
+depends = ["setup"]
+
+[tasks.play-deathmatch]
+description = "Play in the challenging deathmatch environment"
+run = [
+    "echo 'Loading model for deathmatch...'",
+    "if [ ! -f models/ppo/hellbot.zip ]; then echo 'No trained model found! Run \"mise run train\" first.'; exit 1; fi",
+    "uv run python scripts/play.py VizdoomDeathmatch-v0 3"
+]
+depends = ["setup"]
+
+[tasks.install]
+description = "Install dependencies only"
+run = "uv sync"
+
+[tasks.dev-install]
+description = "Install project in development mode"
+run = "uv pip install -e ."
+depends = ["install"]
+
+[tasks.clean]
+description = "Clean up generated files and cache"
+run = [
+    "echo 'Cleaning up generated files...'",
+    "rm -rf models/ppo/*.zip",
+    "rm -rf __pycache__",
+    "rm -rf .pytest_cache",
+    "rm -rf *.egg-info",
+    "echo 'Cleanup complete!'"
+]
+
+[tasks.check-cuda]
+description = "Verify CUDA setup and GPU availability"
+run = [
+    "uv run python -c 'import torch; print(f\"PyTorch version: {torch.__version__}\"); print(f\"CUDA available: {torch.cuda.is_available()}\"); print(f\"CUDA version: {torch.version.cuda if torch.cuda.is_available() else \"N/A\"}\"); print(f\"Device count: {torch.cuda.device_count()}\"); print(f\"Current device: {torch.cuda.current_device() if torch.cuda.is_available() else \"CPU\"}\")';",
+    "uv run python -c 'import vizdoom; print(f\"VizDoom version: {vizdoom.__version__}\")';",
+    "uv run python -c 'import stable_baselines3; print(f\"Stable-Baselines3 version: {stable_baselines3.__version__}\")'"
+]
+
+[tasks.status]
+description = "Show comprehensive project status including training progress"
+run = [
+    "echo 'Hellbot Project Status'",
+    "echo '====================='",
+    "echo 'Available models:'",
+    "ls -la models/ppo/ 2>/dev/null || echo 'No models found'",
+    "echo ''",
+    "echo 'Training progress:'",
+    "uv run python scripts/train.py --progress",
+    "echo ''",
+    "echo 'Environment info:'",
+    "uv run python --version",
+    "echo 'Dependencies status:'",
+    "uv pip list | grep -E '(torch|stable|vizdoom|gymnasium)' || echo 'Dependencies not installed'"
+]
+
+# CHECKPOINT MANAGEMENT TASKS
+[tasks.progress]
+description = "Show current training progress and curriculum status"
+run = [
+    "echo 'Checking training progress...'",
+    "uv run python scripts/train.py --progress"
+]
+
+[tasks.checkpoints]
+description = "List all available checkpoints and model files"
+run = [
+    "echo 'Listing available checkpoints...'",
+    "uv run python scripts/train.py --checkpoints"
+]
+
+[tasks.reset-progress]
+description = "Reset training progress (start completely fresh next time)"
+run = [
+    "echo 'WARNING: This will reset all training progress!'",
+    "uv run python scripts/train.py --reset"
+]
+
+[tasks.train-fresh]
+description = "Start completely fresh training (ignore any previous progress)"
+run = [
+    "echo 'Starting FRESH curriculum training (ignoring previous progress)...'",
+    "echo 'Base timesteps: 100k'",
+    "uv run python scripts/train.py --fresh 100000"
+]
+depends = ["setup"]
+
+[tasks.clean-checkpoints]
+description = "Clean up old automatic checkpoints (keep main model)"
+run = [
+    "echo 'Cleaning up old automatic checkpoints...'",
+    "find models/ppo -name 'hellbot_checkpoint_*.zip' -delete 2>/dev/null || true",
+    "echo 'Old checkpoints removed. Main model preserved.'"
+]
+
+# Note: uv plugin is automatically available in modern mise versions
+# No need for explicit plugin configuration
